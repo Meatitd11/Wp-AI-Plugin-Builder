@@ -48,7 +48,7 @@ class Plugin_Generator {
     }
 
     /**
-     * Analyse a prompt and provide feature suggestions.
+     * Analyse prompt and return suggested features.
      *
      * @return void
      */
@@ -163,7 +163,7 @@ class Plugin_Generator {
     }
 
     /**
-     * Build structured payload for AI calls.
+     * Build payload for remote submission.
      *
      * @param string $name        Plugin name.
      * @param string $description Description.
@@ -189,9 +189,9 @@ class Plugin_Generator {
     }
 
     /**
-     * Attempt to call the configured remote AI service.
+     * Attempt remote generation.
      *
-     * @param string $model   Model identifier.
+     * @param string $model   Model key.
      * @param array  $payload Payload data.
      *
      * @return array|WP_Error
@@ -211,11 +211,6 @@ class Plugin_Generator {
             return new WP_Error( 'ai_missing_endpoint', \__( 'No endpoint available for the selected model.', 'ai-plugin-builder-studio' ) );
         }
 
-        $request_body = [
-            'model'   => $model,
-            'payload' => $payload,
-        ];
-
         $response = \wp_remote_post(
             $endpoint,
             [
@@ -225,7 +220,12 @@ class Plugin_Generator {
                     'Content-Type'  => 'application/json',
                     'Authorization' => 'Bearer ' . $credentials['api_key'],
                 ],
-                'body'    => \wp_json_encode( $request_body ),
+                'body'    => \wp_json_encode(
+                    [
+                        'model'   => $model,
+                        'payload' => $payload,
+                    ]
+                ),
             ]
         );
 
@@ -253,7 +253,7 @@ class Plugin_Generator {
     }
 
     /**
-     * Provide default endpoint guesses for supported models.
+     * Default endpoint helper.
      *
      * @param string $model Model key.
      *
@@ -274,10 +274,10 @@ class Plugin_Generator {
     }
 
     /**
-     * Create plugin files using WP_Filesystem.
+     * Write plugin files via WP_Filesystem.
      *
      * @param string $slug  Plugin slug.
-     * @param array  $files Array of relative path => contents.
+     * @param array  $files Files to create.
      *
      * @return true|WP_Error
      */
@@ -327,10 +327,10 @@ class Plugin_Generator {
     }
 
     /**
-     * Determine plugin file for activation.
+     * Determine plugin file path for activation.
      *
      * @param string $slug     Plugin slug.
-     * @param array  $manifest Manifest array.
+     * @param array  $manifest Manifest data.
      *
      * @return string
      */
@@ -345,7 +345,7 @@ class Plugin_Generator {
     /**
      * Attempt to activate generated plugin.
      *
-     * @param string $plugin_file Plugin path.
+     * @param string $plugin_file Plugin file path.
      *
      * @return true|WP_Error
      */
@@ -366,195 +366,177 @@ class Plugin_Generator {
     }
 
     /**
-     * Generate a basic plugin locally when remote generation is unavailable.
+     * Generate simple local plugin scaffold.
      *
      * @param string $slug        Plugin slug.
      * @param string $name        Plugin name.
      * @param string $description Description.
      * @param string $version     Version.
-     * @param array  $features    Selected features.
-     * @param string $prompt      Original prompt text.
+     * @param array  $features    Features requested.
+     * @param string $prompt      Original prompt.
      *
-     * @return array|WP_Error
+     * @return array
      */
     protected function generate_local_scaffold( $slug, $name, $description, $version, array $features, $prompt ) {
         $constant_prefix = strtoupper( str_replace( '-', '_', $slug ) );
         $class_prefix    = implode( '_', array_map( 'ucfirst', explode( '-', $slug ) ) );
         $text_domain     = sanitize_title( $slug );
+        $bootstrap_fn    = str_replace( '-', '_', $slug ) . '_bootstrap';
 
-        $main_file = sprintf(
-            "<?php\n" .
-            "/**\n" .
-            " * Plugin Name: %1\$s\n" .
-            " * Description: %2\$s\n" .
-            " * Version: %3\$s\n" .
-            " * Author: Generated via AI Plugin Builder Studio Pro\n" .
-            " * Text Domain: %4\$s\n" .
-            " */\n\n" .
-            "if ( ! defined( 'ABSPATH' ) ) {\n    exit;\n}\n\n" .
-            "define( '%5\$s_VERSION', '%3\$s' );\n" .
-            "define( '%5\$s_DIR', plugin_dir_path( __FILE__ ) );\n" .
-            "define( '%5\$s_URL', plugin_dir_url( __FILE__ ) );\n\n" .
-            "require_once %5\$s_DIR . 'includes/class-core.php';\n\n" .
-            "function %6\$s_bootstrap() {\n    \%7\$s_Core::get_instance()->init();\n}\n" .
-            "add_action( 'plugins_loaded', '%6\$s_bootstrap' );\n\n" .
-            "register_activation_hook( __FILE__, [ '\\\%7\$s_Core', 'activate' ] );\n" .
-            "register_deactivation_hook( __FILE__, [ '\\\%7\$s_Core', 'deactivate' ] );\n",
-            $name,
-            $description,
-            $version,
-            $text_domain,
-            $constant_prefix,
-            str_replace( '-', '_', $slug ),
-            $class_prefix
+        $feature_summary = empty( $features ) ? 'None specified.' : implode( ', ', $features );
+
+        $main_template = <<<'PHP'
+<?php
+/**
+ * Plugin Name: {PLUGIN_NAME}
+ * Description: {DESCRIPTION}
+ * Version: {VERSION}
+ * Author: Generated via AI Plugin Builder Studio Pro
+ * Text Domain: {TEXT_DOMAIN}
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+define( '{CONST_PREFIX}_VERSION', '{VERSION}' );
+define( '{CONST_PREFIX}_DIR', plugin_dir_path( __FILE__ ) );
+define( '{CONST_PREFIX}_URL', plugin_dir_url( __FILE__ ) );
+
+require_once {CONST_PREFIX}_DIR . 'includes/class-core.php';
+
+function {BOOTSTRAP_FN}() {
+    \{CLASS_PREFIX}_Core::get_instance()->init();
+}
+
+add_action( 'plugins_loaded', '{BOOTSTRAP_FN}' );
+
+register_activation_hook( __FILE__, [ '\{CLASS_PREFIX}_Core', 'activate' ] );
+register_deactivation_hook( __FILE__, [ '\{CLASS_PREFIX}_Core', 'deactivate' ] );
+PHP;
+
+        $core_template = <<<'PHP'
+<?php
+/**
+ * Core functionality for {CLASS_PREFIX} plugin.
+ *
+ * Prompt summary: {PROMPT}
+ * Features requested: {FEATURES}
+ */
+
+class {CLASS_PREFIX}_Core {
+
+    /**
+     * Singleton instance.
+     *
+     * @var {CLASS_PREFIX}_Core
+     */
+    protected static $instance;
+
+    /**
+     * Retrieve instance.
+     *
+     * @return {CLASS_PREFIX}_Core
+     */
+    public static function get_instance() {
+        if ( null === static::$instance ) {
+            static::$instance = new static();
+        }
+
+        return static::$instance;
+    }
+
+    /**
+     * Initialise hooks.
+     *
+     * @return void
+     */
+    public function init() {
+        // TODO: Generated features can hook into WordPress here.
+    }
+
+    /**
+     * Activation routine.
+     *
+     * @return void
+     */
+    public static function activate() {
+        // TODO: Add activation tasks.
+    }
+
+    /**
+     * Deactivation routine.
+     *
+     * @return void
+     */
+    public static function deactivate() {
+        // TODO: Add deactivation cleanup.
+    }
+}
+PHP;
+
+        $main_file = strtr(
+            $main_template,
+            [
+                '{PLUGIN_NAME}' => $name,
+                '{DESCRIPTION}' => $description,
+                '{VERSION}'     => $version,
+                '{TEXT_DOMAIN}' => $text_domain,
+                '{CONST_PREFIX}' => $constant_prefix,
+                '{BOOTSTRAP_FN}' => $bootstrap_fn,
+                '{CLASS_PREFIX}' => $class_prefix,
+            ]
         );
 
-        $core_class = $this->prepare_core_class( $slug, $class_prefix, $constant_prefix, $features, $prompt );
-
-        $files = [
-            $slug . '/' . $slug . '.php'               => $main_file,
-            $slug . '/includes/class-core.php'         => $core_class,
-            $slug . '/readme.txt'                      => $this->prepare_readme( $name, $description, $version, $prompt ),
-            $slug . '/uninstall.php'                   => $this->prepare_uninstall_file( $slug ),
-            $slug . '/assets/css/admin.css'            => $this->prepare_admin_css(),
-        ];
-
-        if ( in_array( 'frontend-form', $features, true ) || in_array( 'shortcode', $features, true ) ) {
-            $files[ $slug . '/assets/css/frontend.css' ] = $this->prepare_frontend_css( $slug );
-            $files[ $slug . '/assets/js/frontend.js' ]  = $this->prepare_frontend_js( $slug );
-        }
-
-        if ( in_array( 'frontend-form', $features, true ) ) {
-            $files[ $slug . '/partials/form.php' ] = $this->prepare_frontend_form( $slug );
-        }
+        $core_file = strtr(
+            $core_template,
+            [
+                '{CLASS_PREFIX}' => $class_prefix,
+                '{PROMPT}'       => $prompt,
+                '{FEATURES}'     => $feature_summary,
+            ]
+        );
 
         return [
-            'files'     => $files,
+            'files'     => [
+                $slug . '/' . $slug . '.php'       => $main_file,
+                $slug . '/includes/class-core.php' => $core_file,
+            ],
             'main_file' => $slug . '/' . $slug . '.php',
         ];
     }
 
     /**
-     * Build core class contents.
+     * Suggest basic features based on prompt keywords.
      *
-     * @param string $slug            Slug.
-     * @param string $class_prefix    Class prefix.
-     * @param string $constant_prefix Constant prefix.
-     * @param array  $features        Feature list.
-     * @param string $prompt          Original prompt.
+     * @param string $prompt Prompt text.
      *
-     * @return string
+     * @return array
      */
-    protected function prepare_core_class( $slug, $class_prefix, $constant_prefix, array $features, $prompt ) {
-        $init_lines = [];
-        $methods    = [];
+    protected function suggest_features_from_prompt( $prompt ) {
+        $clean = strtolower( $prompt );
 
-        if ( in_array( 'admin-settings', $features, true ) ) {
-            $init_lines[] = "add_action( 'admin_menu', [ \$this, 'register_admin_menu' ] );";
-            $init_lines[] = "add_action( 'admin_init', [ \$this, 'register_settings' ] );";
-
-            $methods[] = sprintf(
-                "    public function register_admin_menu() {\n        add_menu_page(\n            esc_html__( '%1\$s Settings', '%2\$s' ),\n            esc_html__( '%1\$s', '%2\$s' ),\n            'manage_options',\n            '%2\$s',\n            [ \$this, 'render_settings_page' ],\n            'dashicons-admin-generic',\n            58\n        );\n    }\n\n    public function render_settings_page() {\n        if ( ! current_user_can( 'manage_options' ) ) {\n            return;\n        }\n\n        echo '<div class=\"wrap\">';\n        echo '<h1>' . esc_html__( '%1\$s', '%2\$s' ) . '</h1>';\n        echo '<form method=\"post\" action=\"options.php\">';\n        settings_fields( '%2\$s_settings' );\n        do_settings_sections( '%2\$s_settings' );\n        submit_button();\n        echo '</form></div>';\n    }\n\n    public function register_settings() {\n        register_setting( '%2\$s_settings', '%2\$s_options', [\n            'type'              => 'array',\n            'sanitize_callback' => [ \$this, 'sanitize_options' ],\n            'default'           => [ 'enabled' => true ],\n        ] );\n\n        add_settings_section(\n            '%2\$s_main_section',\n            esc_html__( 'General Settings', '%2\$s' ),\n            function () {\n                echo '<p>' . esc_html__( 'Configure the core behaviours for this plugin.', '%2\$s' ) . '</p>';\n            },\n            '%2\$s_settings'\n        );\n\n        add_settings_field(\n            '%2\$s_enabled',\n            esc_html__( 'Enable functionality', '%2\$s' ),\n            function () {\n                $options = get_option( '%2\$s_options', [] );\n                $checked = isset( $options['enabled'] ) ? (bool) $options['enabled'] : true;\n                echo '<label><input type=\"checkbox\" name=\"%2\$s_options[enabled]\" value=\"1\"' . checked( true, $checked, false ) . '/> ' . esc_html__( 'Active', '%2\$s' ) . '</label>';\n            },\n            '%2\$s_settings',\n            '%2\$s_main_section'\n        );\n    }\n\n    public function sanitize_options( $options ) {\n        $options = is_array( $options ) ? $options : [];\n        $options['enabled'] = isset( $options['enabled'] ) ? (bool) $options['enabled'] : false;\n\n        return $options;\n    }",
-                $class_prefix,
-                $slug
-            );
-        }
-
-        if ( in_array( 'shortcode', $features, true ) ) {
-            $init_lines[] = "add_shortcode( '{$slug}_display', [ \$this, 'render_shortcode' ] );";
-
-            $methods[] = sprintf(
-                "    public function render_shortcode() {\n        ob_start();\n        echo '<div class="%1\$s-output">' . esc_html__( 'Generated by %1\$s plugin.', '%1\$s' ) . '</div>';\n        return ob_get_clean();\n    }",
-                $slug
-            );
-        }
-
-        if ( in_array( 'frontend-form', $features, true ) ) {
-            $init_lines[] = "add_shortcode( '{$slug}_form', [ \$this, 'render_frontend_form' ] );";
-            $init_lines[] = "add_action( 'wp_enqueue_scripts', [ \$this, 'enqueue_frontend_assets' ] );";
-            $init_lines[] = "add_action( 'init', [ \$this, 'maybe_handle_form_submission' ] );";
-
-            $methods[] = sprintf(
-                "    public function enqueue_frontend_assets() {\n        wp_enqueue_style( '%1\$s-frontend', %2\$s_URL . 'assets/css/frontend.css', [], %2\$s_VERSION );\n        wp_enqueue_script( '%1\$s-frontend', %2\$s_URL . 'assets/js/frontend.js', [ 'jquery' ], %2\$s_VERSION, true );\n    }",
-                $slug,
-                $constant_prefix
-            );
-
-            if ( in_array( 'database', $features, true ) ) {
-                $insert_line = "        if ( ! empty( \\$_POST['{$slug}_field'] ) ) {\n            static::insert_submission( sanitize_text_field( wp_unslash( \\$_POST['{$slug}_field'] ) ) );\n        }";
-            } else {
-                $insert_line = '';
-            }
-
-            $methods[] = sprintf(
-                "    public function maybe_handle_form_submission() {\n        if ( ! isset( \\$_POST['%1\$s_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( \\$_POST['%1\$s_nonce'] ) ), '%1\$s_submit' ) ) {\n            return;\n        }\n\n        %3\$s\n        wp_safe_redirect( wp_get_referer() ? wp_get_referer() : home_url() );\n        exit;\n    }\n\n    public function render_frontend_form() {\n        ob_start();\n        include %2\$s_DIR . 'partials/form.php';\n        return ob_get_clean();\n    }",
-                $slug,
-                $constant_prefix,
-                $insert_line
-            );
-        }
-
-        if ( in_array( 'custom-post-type', $features, true ) ) {
-            $init_lines[] = "add_action( 'init', [ \$this, 'register_custom_post_type' ] );";
-
-            $methods[] = sprintf(
-                "    public function register_custom_post_type() {\n        register_post_type( '%1\$s_item', [\n            'label'        => esc_html__( '%2\$s Item', '%1\$s' ),\n            'public'       => true,\n            'show_in_rest' => true,\n            'supports'     => [ 'title', 'editor', 'thumbnail' ],\n        ] );\n    }",
-                $slug,
-                ucwords( str_replace( '-', ' ', $slug ) )
-            );
-        }
-
-        if ( in_array( 'database', $features, true ) ) {
-            $methods[] = sprintf(
-                "    protected static function get_table_name() {\n        global $wpdb;\n\n        return $wpdb->prefix . '%1\$s_records';\n    }\n\n    public static function activate() {\n        static::create_database_table();\n    }\n\n    protected static function create_database_table() {\n        global $wpdb;\n        require_once ABSPATH . 'wp-admin/includes/upgrade.php';\n\n        $table_name      = static::get_table_name();\n        $charset_collate = $wpdb->get_charset_collate();\n\n        $sql = "CREATE TABLE {$table_name} (\n            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n            entry_value TEXT NOT NULL,\n            user_id BIGINT UNSIGNED DEFAULT NULL,\n            created_at DATETIME NOT NULL,\n            PRIMARY KEY (id)\n        ) {$charset_collate};";\n\n        dbDelta( $sql );\n    }\n\n    protected static function insert_submission( $value ) {\n        global $wpdb;\n\n        $wpdb->insert(\n            static::get_table_name(),\n            [\n                'entry_value' => $value,\n                'user_id'     => get_current_user_id(),\n                'created_at'  => current_time( 'mysql', 1 ),\n            ],\n            [ '%s', '%d', '%s' ]\n        );\n    }",
-                $slug
-            );
-        } else {
-            $methods[] = "    public static function activate() {}";
-        }
-
-        if ( in_array( 'rest-api', $features, true ) ) {
-            $init_lines[] = "add_action( 'rest_api_init', [ \$this, 'register_rest_routes' ] );";
-
-            $callback_body = in_array( 'database', $features, true )
-                ? "                global \\$wpdb;\n                \\V$records = \\V$wpdb->get_results( 'SELECT * FROM ' . static::get_table_name() . ' ORDER BY created_at DESC', ARRAY_A );"
-                : "                \\V$records = [];";
-
-            $callback_body = str_replace( '\\V', '$', $callback_body );
-
-            $methods[] = sprintf(
-                "    public function register_rest_routes() {\n        register_rest_route( '%1\$s/v1', '/records', [\n            'methods'             => 'GET',\n            'permission_callback' => function () {\n                return current_user_can( 'manage_options' );\n            },\n            'callback'            => function () {\n%2\$s\n                return rest_ensure_response( $records );\n            },\n        ] );\n    }",
-                $slug,
-                $callback_body
-            );
-        }
-
-        if ( empty( $init_lines ) ) {
-            $init_lines[] = '// No feature-specific hooks registered.';
-        }
-
-        $class_template = "<?php\n/**\n * Core functionality for %1\$s plugin.\n *\n * Generated from prompt: %2\$s\n */\n\nclass %3\$s_Core {\n\n    protected static $instance;\n\n    public static function get_instance() {\n        if ( null === static::$instance ) {\n            static::$instance = new static();\n        }\n\n        return static::$instance;\n    }\n\n    public function init() {\n        %4\$s\n    }\n\n    public static function deactivate() {}\n\n%5\$s\n}\n";
-
-        return sprintf(
-            $class_template,
-            $class_prefix,
-            addslashes( $prompt ),
-            $class_prefix,
-            implode( "\n        ", $init_lines ),
-            implode( "\n\n", $methods )
-        );
+        return [
+            [
+                'id'       => 'admin-settings',
+                'label'    => \__( 'Include an admin settings page', 'ai-plugin-builder-studio' ),
+                'selected' => ( false !== strpos( $clean, 'admin' ) ) || ( false !== strpos( $clean, 'setting' ) ),
+            ],
+            [
+                'id'       => 'shortcode',
+                'label'    => \__( 'Provide a shortcode for output', 'ai-plugin-builder-studio' ),
+                'selected' => ( false !== strpos( $clean, 'shortcode' ) ) || ( false !== strpos( $clean, 'embed' ) ),
+            ],
+            [
+                'id'       => 'custom-post-type',
+                'label'    => \__( 'Register a custom post type', 'ai-plugin-builder-studio' ),
+                'selected' => ( false !== strpos( $clean, 'post type' ) ) || ( false !== strpos( $clean, 'catalog' ) ),
+            ],
+            [
+                'id'       => 'database',
+                'label'    => \__( 'Store data in a custom table', 'ai-plugin-builder-studio' ),
+                'selected' => ( false !== strpos( $clean, 'record' ) ) || ( false !== strpos( $clean, 'booking' ) ),
+            ],
+        ];
     }
-
-    /**
-     * Build default admin CSS.
-     *
-     * @return string
-     */
-    protected function prepare_admin_css() {
-        return ".ai-pbs-generated-card {\n    background: #ffffff;\n    border: 1px solid #e2e8f0;\n    border-radius: 8px;\n    padding: 20px;\n    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);\n}\n";
-    }
-
-    /**
-     * Build frontend CSS.
-     *
-
+}

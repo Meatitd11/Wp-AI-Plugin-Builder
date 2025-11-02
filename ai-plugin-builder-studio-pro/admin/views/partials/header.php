@@ -22,7 +22,7 @@ $tabs       = isset( $tabs ) && is_array( $tabs ) ? $tabs : [];
 $currentTab = isset( $currentTab ) ? sanitize_key( $currentTab ) : 'connect';
 
 ?>
-<div class="wrap ai-pbs-wrap">
+<div class="ai-pbs-wrap">
     <h1 class="ai-pbs-title"><?php esc_html_e( 'AI Plugin Builder Studio Pro', 'ai-plugin-builder-studio' ); ?></h1>
     <p class="ai-pbs-subtitle"><?php esc_html_e( 'Let AI architect, develop, and launch production-ready WordPress plugins without leaving your dashboard.', 'ai-plugin-builder-studio' ); ?></p>
 
