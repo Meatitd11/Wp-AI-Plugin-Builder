@@ -48,12 +48,12 @@ class Plugin_Generator {
     }
 
     /**
-     * Analyze prompt and return clarifying suggestions.
+     * Analyse a prompt and provide feature suggestions.
      *
      * @return void
      */
     public function handle_analyze_prompt() {
-        $nonce  = isset( $_POST['nonce'] ) ? \sanitize_text_field( \wp_unslash( $_POST['nonce'] ) ) : '';
+        $nonce = isset( $_POST['nonce'] ) ? \sanitize_text_field( \wp_unslash( $_POST['nonce'] ) ) : '';
         \ai_pbs_verify_nonce( $nonce, 'ai-pbs-admin' );
 
         $prompt = isset( $_POST['prompt'] ) ? \sanitize_textarea_field( \wp_unslash( $_POST['prompt'] ) ) : '';
@@ -62,17 +62,15 @@ class Plugin_Generator {
             \wp_send_json_error( [ 'message' => \__( 'Prompt is required.', 'ai-plugin-builder-studio' ) ], 400 );
         }
 
-        $recommendations = $this->suggest_features_from_prompt( $prompt );
-
         \wp_send_json_success(
             [
-                'recommendations' => $recommendations,
+                'recommendations' => $this->suggest_features_from_prompt( $prompt ),
             ]
         );
     }
 
     /**
-     * Handle AJAX request to generate a plugin.
+     * Handle plugin generation request.
      *
      * @return void
      */
@@ -96,58 +94,44 @@ class Plugin_Generator {
 
         $slug = $slug_input ? $slug_input : \ai_pbs_generate_slug( $plugin_name );
 
-        $plugin_dir = \trailingslashit( WP_PLUGIN_DIR ) . $slug;
+        $plugin_dir = trailingslashit( WP_PLUGIN_DIR ) . $slug;
 
         if ( file_exists( $plugin_dir ) ) {
             \wp_send_json_error( [ 'message' => \__( 'A plugin with this slug already exists. Please choose another name.', 'ai-plugin-builder-studio' ) ], 409 );
         }
 
-        $payload = $this->build_generation_payload(
-            $plugin_name,
-            $description,
-            $version,
-            $prompt,
-            $features,
-            $notes
-        );
+        $payload = $this->build_generation_payload( $plugin_name, $description, $version, $prompt, $features, $notes );
 
         $manifest = $this->attempt_remote_generation( $model, $payload );
 
-        if ( \is_wp_error( $manifest ) ) {
+        if ( is_wp_error( $manifest ) ) {
             $this->logger->log( 'Remote generation unavailable, falling back to local scaffold', [
                 'model'  => $model,
                 'reason' => $manifest->get_error_message(),
             ] );
 
-            $manifest = $this->generate_local_scaffold(
-                $slug,
-                $plugin_name,
-                $description,
-                $version,
-                $prompt,
-                $features
-            );
+            $manifest = $this->generate_local_scaffold( $slug, $plugin_name, $description, $version, $features, $prompt );
         }
 
-        if ( \is_wp_error( $manifest ) || empty( $manifest['files'] ) ) {
-            $message = \is_wp_error( $manifest ) ? $manifest->get_error_message() : \__( 'Failed to generate plugin manifest.', 'ai-plugin-builder-studio' );
+        if ( is_wp_error( $manifest ) || empty( $manifest['files'] ) ) {
+            $message = is_wp_error( $manifest ) ? $manifest->get_error_message() : \__( 'Failed to generate plugin manifest.', 'ai-plugin-builder-studio' );
             \wp_send_json_error( [ 'message' => $message ], 500 );
         }
 
         $write_result = $this->create_plugin_files( $slug, $manifest['files'] );
 
-        if ( \is_wp_error( $write_result ) ) {
+        if ( is_wp_error( $write_result ) ) {
             \wp_send_json_error( [ 'message' => $write_result->get_error_message() ], 500 );
         }
 
         $plugin_file = $this->determine_plugin_file( $slug, $manifest );
+        $activated   = false;
 
-        $activated = false;
         if ( $plugin_file ) {
             $activation = $this->activate_generated_plugin( $plugin_file );
-            $activated  = ! \is_wp_error( $activation );
+            $activated  = ! is_wp_error( $activation );
 
-            if ( \is_wp_error( $activation ) ) {
+            if ( is_wp_error( $activation ) ) {
                 $this->logger->log( 'Plugin activation encountered an error', [
                     'plugin' => $plugin_file,
                     'error'  => $activation->get_error_message(),
@@ -167,24 +151,24 @@ class Plugin_Generator {
             ]
         );
 
-        $response = [
-            'message'     => $activated ? \__( 'Plugin successfully created and activated!', 'ai-plugin-builder-studio' ) : \__( 'Plugin created. Activation required manually.', 'ai-plugin-builder-studio' ),
-            'activated'   => $activated,
-            'pluginSlug'  => $slug,
-            'pluginFile'  => $plugin_file,
-            'files'       => array_keys( $manifest['files'] ),
-        ];
-
-        \wp_send_json_success( $response );
+        \wp_send_json_success(
+            [
+                'message'     => $activated ? \__( 'Plugin successfully created and activated!', 'ai-plugin-builder-studio' ) : \__( 'Plugin created. Activation required manually.', 'ai-plugin-builder-studio' ),
+                'activated'   => $activated,
+                'pluginSlug'  => $slug,
+                'pluginFile'  => $plugin_file,
+                'files'       => array_keys( $manifest['files'] ),
+            ]
+        );
     }
 
     /**
-     * Build payload to send to AI model.
+     * Build structured payload for AI calls.
      *
      * @param string $name        Plugin name.
-     * @param string $description Plugin description.
-     * @param string $version     Desired version.
-     * @param string $prompt      User prompt.
+     * @param string $description Description.
+     * @param string $version     Version.
+     * @param string $prompt      Prompt text.
      * @param array  $features    Selected features.
      * @param string $notes       Additional notes.
      *
@@ -196,7 +180,7 @@ class Plugin_Generator {
             'plugin_description' => $description,
             'version'            => $version,
             'prompt'             => $prompt,
-            'features'           => array_map( 'sanitize_key', $features ),
+            'features'           => $features,
             'notes'              => $notes,
             'wordpress_version'  => \get_bloginfo( 'version' ),
             'php_version'        => PHP_VERSION,
@@ -205,7 +189,7 @@ class Plugin_Generator {
     }
 
     /**
-     * Attempt to call configured AI service.
+     * Attempt to call the configured remote AI service.
      *
      * @param string $model   Model identifier.
      * @param array  $payload Payload data.
@@ -232,24 +216,24 @@ class Plugin_Generator {
             'payload' => $payload,
         ];
 
-        $args = [
-            'method'      => 'POST',
-            'timeout'     => 60,
-            'headers'     => [
-                'Content-Type'  => 'application/json',
-                'Authorization' => 'Bearer ' . $credentials['api_key'],
-            ],
-            'body'        => \wp_json_encode( $request_body ),
-            'data_format' => 'body',
-        ];
+        $response = \wp_remote_post(
+            $endpoint,
+            [
+                'method'  => 'POST',
+                'timeout' => 60,
+                'headers' => [
+                    'Content-Type'  => 'application/json',
+                    'Authorization' => 'Bearer ' . $credentials['api_key'],
+                ],
+                'body'    => \wp_json_encode( $request_body ),
+            ]
+        );
 
-        $response = \wp_remote_post( $endpoint, $args );
-
-        if ( \is_wp_error( $response ) ) {
+        if ( is_wp_error( $response ) ) {
             return $response;
         }
 
-        $code = \wp_remote_retrieve_response_code( $response );
+        $code = (int) \wp_remote_retrieve_response_code( $response );
         $body = \wp_remote_retrieve_body( $response );
 
         if ( $code < 200 || $code >= 300 ) {
@@ -258,21 +242,20 @@ class Plugin_Generator {
 
         $decoded = json_decode( $body, true );
 
-        if ( null === $decoded || ! isset( $decoded['files'] ) || ! is_array( $decoded['files'] ) ) {
+        if ( null === $decoded || empty( $decoded['files'] ) || ! is_array( $decoded['files'] ) ) {
             return new WP_Error( 'ai_invalid_response', \__( 'AI service returned an invalid response.', 'ai-plugin-builder-studio' ) );
         }
 
         return [
-            'files'       => $decoded['files'],
-            'main_file'   => isset( $decoded['main_file'] ) ? $decoded['main_file'] : '',
-            'instructions'=> isset( $decoded['instructions'] ) ? $decoded['instructions'] : '',
+            'files'     => $decoded['files'],
+            'main_file' => isset( $decoded['main_file'] ) ? $decoded['main_file'] : '',
         ];
     }
 
     /**
-     * Provide default API endpoint for supported models.
+     * Provide default endpoint guesses for supported models.
      *
-     * @param string $model Model identifier.
+     * @param string $model Model key.
      *
      * @return string
      */
@@ -291,77 +274,22 @@ class Plugin_Generator {
     }
 
     /**
-     * Generate plugin files locally when remote AI is unavailable.
-     *
-     * @param string $slug         Plugin slug.
-     * @param string $name         Plugin name.
-     * @param string $description  Description.
-     * @param string $version      Version.
-     * @param string $prompt       User prompt.
-     * @param array  $features     Selected features.
-     *
-     * @return array
-     */
-    protected function generate_local_scaffold( $slug, $name, $description, $version, $prompt, array $features ) {
-        $class_prefix = $this->generate_class_prefix( $slug );
-        $files        = [];
-
-        $files[ $slug . '/' . $slug . '.php' ] = $this->render_local_main_file( $slug, $name, $description, $version, $class_prefix );
-        $files[ $slug . '/includes/class-' . $slug . '.php' ] = $this->render_local_core_class( $slug, $class_prefix, $features, $prompt, $description );
-
-        $has_admin = in_array( 'admin-settings', $features, true );
-        $has_form  = in_array( 'frontend-form', $features, true );
-        $has_short = in_array( 'shortcode', $features, true );
-
-        if ( $has_admin ) {
-            $files[ $slug . '/assets/css/admin.css' ] = $this->render_admin_css();
-            $files[ $slug . '/assets/js/admin.js' ]  = $this->render_admin_js( $slug );
-        }
-
-        if ( in_array( 'database', $features, true ) ) {
-            $files[ $slug . '/includes/class-' . $slug . '-database.php' ] = $this->render_database_handler( $slug, $class_prefix );
-        }
-
-        if ( in_array( 'rest-api', $features, true ) ) {
-            $files[ $slug . '/includes/class-' . $slug . '-rest.php' ] = $this->render_rest_controller( $slug, $class_prefix );
-        }
-
-        if ( $has_form || $has_short ) {
-            $files[ $slug . '/assets/css/frontend.css' ] = $this->render_frontend_css( $slug );
-            $files[ $slug . '/assets/js/frontend.js' ]  = $this->render_frontend_js( $slug );
-        }
-
-        if ( $has_form ) {
-            $files[ $slug . '/partials/form.php' ] = $this->render_frontend_form( $slug );
-        }
-
-        $files[ $slug . '/readme.txt' ] = $this->render_readme( $name, $description, $version, $prompt );
-        $files[ $slug . '/uninstall.php' ] = $this->render_uninstall_file( $slug );
-
-        return [
-            'files'     => $files,
-            'main_file' => $slug . '/' . $slug . '.php',
-        ];
-    }
-
-    /**
-     * Create plugin files on disk using WP filesystem.
+     * Create plugin files using WP_Filesystem.
      *
      * @param string $slug  Plugin slug.
-     * @param array  $files File array path => contents.
+     * @param array  $files Array of relative path => contents.
      *
      * @return true|WP_Error
      */
     protected function create_plugin_files( $slug, array $files ) {
         require_once ABSPATH . 'wp-admin/includes/file.php';
 
-        $access_type = \get_filesystem_method( [ 'path' => WP_PLUGIN_DIR ] );
-        if ( 'direct' !== $access_type ) {
+        if ( 'direct' !== \get_filesystem_method( [ 'path' => WP_PLUGIN_DIR ] ) ) {
             return new WP_Error( 'filesystem_method', \__( 'Direct filesystem access is required to generate plugins. Please adjust your filesystem method.', 'ai-plugin-builder-studio' ) );
         }
 
         if ( ! \WP_Filesystem( false, WP_PLUGIN_DIR, true ) ) {
-            return new WP_Error( 'filesystem_init', \__( 'Unable to initialize WordPress filesystem API.', 'ai-plugin-builder-studio' ) );
+            return new WP_Error( 'filesystem_init', \__( 'Unable to initialise the WordPress filesystem API.', 'ai-plugin-builder-studio' ) );
         }
 
         global $wp_filesystem;
@@ -370,7 +298,7 @@ class Plugin_Generator {
             return new WP_Error( 'filesystem_unavailable', \__( 'Filesystem handler not available.', 'ai-plugin-builder-studio' ) );
         }
 
-        $plugin_base = \trailingslashit( WP_PLUGIN_DIR ) . $slug . '/';
+        $plugin_base = trailingslashit( WP_PLUGIN_DIR ) . $slug . '/';
 
         if ( $wp_filesystem->exists( $plugin_base ) ) {
             return new WP_Error( 'plugin_exists', \__( 'Plugin directory already exists.', 'ai-plugin-builder-studio' ) );
@@ -390,10 +318,8 @@ class Plugin_Generator {
                 return new WP_Error( 'mkdir_failed', sprintf( \__( 'Unable to create directory: %s', 'ai-plugin-builder-studio' ), $dir ) );
             }
 
-            $write = $wp_filesystem->put_contents( $target, $contents, FS_CHMOD_FILE );
-
-            if ( ! $write ) {
-                return new WP_Error( 'write_failed', sprintf( \__( 'Unable to write file: %s', 'ai-plugin-builder-studio' ), $relative_path ) );
+            if ( ! $wp_filesystem->put_contents( $target, $contents, FS_CHMOD_FILE ) ) {
+                return new WP_Error( 'write_failed', sprintf( \__( 'Unable to write file: %s', 'ai-plugin-builder-studio' ), $relative ) );
             }
         }
 
@@ -401,15 +327,15 @@ class Plugin_Generator {
     }
 
     /**
-     * Determine plugin file to activate.
+     * Determine plugin file for activation.
      *
      * @param string $slug     Plugin slug.
-     * @param array  $manifest Manifest data.
+     * @param array  $manifest Manifest array.
      *
      * @return string
      */
     protected function determine_plugin_file( $slug, array $manifest ) {
-        if ( isset( $manifest['main_file'] ) && '' !== $manifest['main_file'] ) {
+        if ( ! empty( $manifest['main_file'] ) ) {
             return $manifest['main_file'];
         }
 
@@ -417,9 +343,9 @@ class Plugin_Generator {
     }
 
     /**
-     * Activate generated plugin using WordPress API.
+     * Attempt to activate generated plugin.
      *
-     * @param string $plugin_file Plugin file relative path.
+     * @param string $plugin_file Plugin path.
      *
      * @return true|WP_Error
      */
@@ -432,7 +358,7 @@ class Plugin_Generator {
 
         $activate = \activate_plugin( $plugin_file, '', false, true );
 
-        if ( \is_wp_error( $activate ) ) {
+        if ( is_wp_error( $activate ) ) {
             return $activate;
         }
 
@@ -440,871 +366,195 @@ class Plugin_Generator {
     }
 
     /**
-     * Suggest features based on prompt keywords.
+     * Generate a basic plugin locally when remote generation is unavailable.
      *
-     * @param string $prompt Prompt text.
-     *
-     * @return array
-     */
-    protected function suggest_features_from_prompt( $prompt ) {
-        $prompt_lower = strtolower( $prompt );
-
-        $suggestions = [
-            [
-                'id'       => 'admin-settings',
-                'label'    => \__( 'Include an admin settings dashboard', 'ai-plugin-builder-studio' ),
-                'selected' => strpos( $prompt_lower, 'admin' ) !== false || strpos( $prompt_lower, 'setting' ) !== false,
-            ],
-            [
-                'id'       => 'shortcode',
-                'label'    => \__( 'Provide a shortcode for front-end rendering', 'ai-plugin-builder-studio' ),
-                'selected' => strpos( $prompt_lower, 'shortcode' ) !== false || strpos( $prompt_lower, 'embed' ) !== false,
-            ],
-            [
-                'id'       => 'custom-post-type',
-                'label'    => \__( 'Register a custom post type', 'ai-plugin-builder-studio' ),
-                'selected' => strpos( $prompt_lower, 'post type' ) !== false || strpos( $prompt_lower, 'catalog' ) !== false,
-            ],
-            [
-                'id'       => 'database',
-                'label'    => \__( 'Create dedicated database tables', 'ai-plugin-builder-studio' ),
-                'selected' => strpos( $prompt_lower, 'record' ) !== false || strpos( $prompt_lower, 'booking' ) !== false || strpos( $prompt_lower, 'inventory' ) !== false,
-            ],
-            [
-                'id'       => 'rest-api',
-                'label'    => \__( 'Expose a REST API endpoint', 'ai-plugin-builder-studio' ),
-                'selected' => strpos( $prompt_lower, 'api' ) !== false || strpos( $prompt_lower, 'integrat' ) !== false,
-            ],
-            [
-                'id'       => 'frontend-form',
-                'label'    => \__( 'Include a front-end submission form', 'ai-plugin-builder-studio' ),
-                'selected' => strpos( $prompt_lower, 'form' ) !== false || strpos( $prompt_lower, 'submission' ) !== false,
-            ],
-        ];
-
-        return $suggestions;
-    }
-
-    /**
-     * Generate PHP class prefix based on slug.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function generate_class_prefix( $slug ) {
-        $parts = explode( '-', $slug );
-        $parts = array_map( 'ucfirst', $parts );
-
-        return implode( '_', $parts );
-    }
-
-    /**
-     * Render main plugin loader file.
-     *
-     * @param string $slug         Plugin slug.
-     * @param string $name         Plugin name.
-     * @param string $description  Description.
-     * @param string $version      Version.
-     * @param string $class_prefix Class prefix.
-     *
-     * @return string
-     */
-    protected function render_local_main_file( $slug, $name, $description, $version, $class_prefix ) {
-        $text_domain    = \sanitize_title( $slug );
-        $constant_prefix = strtoupper( str_replace( '-', '_', $slug ) );
-
-        $function_name = str_replace( '-', '_', $slug ) . '_run';
-
-        $template = <<<PHP
-<?php
-/**
- * Plugin Name: {$name}
- * Description: {$description}
- * Version: {$version}
- * Author: Generated via AI Plugin Builder Studio Pro
- * Text Domain: {$text_domain}
- */
-
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
-
-define( '{$constant_prefix}_VERSION', '{$version}' );
-define( '{$constant_prefix}_DIR', plugin_dir_path( __FILE__ ) );
-define( '{$constant_prefix}_URL', plugin_dir_url( __FILE__ ) );
-
-require_once plugin_dir_path( __FILE__ ) . 'includes/class-{$slug}.php';
-
-function {$function_name}() {
-    \{$class_prefix}::get_instance()->init();
-}
-
-add_action( 'plugins_loaded', '{$function_name}' );
-
-register_activation_hook( __FILE__, [ '\\{$class_prefix}', 'activate' ] );
-register_deactivation_hook( __FILE__, [ '\\{$class_prefix}', 'deactivate' ] );
-PHP;
-
-        return $template;
-    }
-
-    /**
-     * Render core class file with feature hooks.
-     *
-     * @param string $slug         Plugin slug.
-     * @param string $class_prefix Class prefix.
-     * @param array  $features     Selected features.
-     * @param string $prompt       Prompt description.
-     * @param string $description  Plugin description.
-     *
-     * @return string
-     */
-    protected function render_local_core_class( $slug, $class_prefix, array $features, $prompt, $description ) {
-        $has_admin     = in_array( 'admin-settings', $features, true );
-        $has_shortcode = in_array( 'shortcode', $features, true );
-        $has_cpt       = in_array( 'custom-post-type', $features, true );
-        $has_db        = in_array( 'database', $features, true );
-        $has_rest      = in_array( 'rest-api', $features, true );
-        $has_form      = in_array( 'frontend-form', $features, true );
-
-        $constant_prefix = strtoupper( str_replace( '-', '_', $slug ) );
-
-        $methods = [];
-        $hooks   = [];
-
-        if ( $has_admin ) {
-            $hooks[] = "add_action( 'admin_menu', [ \$this, 'register_admin_menu' ] );";
-            $hooks[] = "add_action( 'admin_init', [ \$this, 'register_settings' ] );";
-            $hooks[] = "add_action( 'admin_enqueue_scripts', [ \$this, 'enqueue_admin_assets' ] );";
-            $methods[] = $this->render_method_register_admin_menu( $slug );
-            $methods[] = $this->render_method_register_settings( $slug );
-            $methods[] = $this->render_method_enqueue_admin_assets( $slug, $constant_prefix );
-        }
-
-        if ( $has_shortcode ) {
-            $hooks[] = "add_shortcode( '{$slug}_display', [ \$this, 'render_shortcode' ] );";
-            $methods[] = $this->render_method_shortcode( $slug, $has_form, $constant_prefix );
-        }
-
-        if ( $has_form || $has_shortcode ) {
-            $hooks[] = "add_action( 'wp_enqueue_scripts', [ \$this, 'enqueue_frontend_assets' ] );";
-        }
-
-        if ( $has_form ) {
-            $hooks[] = "add_action( 'init', [ \$this, 'maybe_handle_form_submission' ] );";
-            $methods[] = $this->render_method_enqueue_front_assets( $slug, $constant_prefix );
-            $methods[] = $this->render_method_handle_form_submission( $slug, $has_db );
-        } elseif ( $has_shortcode ) {
-            $methods[] = $this->render_method_enqueue_front_assets( $slug, $constant_prefix );
-        }
-
-        if ( $has_cpt ) {
-            $hooks[] = "add_action( 'init', [ \$this, 'register_custom_post_type' ] );";
-            $methods[] = $this->render_method_register_cpt( $slug );
-        }
-
-        if ( $has_db ) {
-            $hooks[] = "register_activation_hook( __FILE__, [ __CLASS__, 'activate' ] );"; // Already registered in main but ensures table creation.
-            $methods[] = $this->render_method_get_table_name( $slug );
-            $methods[] = $this->render_method_create_table( $slug );
-            if ( $has_form ) {
-                $methods[] = $this->render_method_insert_submission( $slug );
-            }
-        }
-
-        if ( $has_rest ) {
-            $hooks[] = "add_action( 'rest_api_init', [ \$this, 'register_rest_routes' ] );";
-            $methods[] = $this->render_method_register_rest_routes( $slug, $has_db );
-        }
-
-        if ( empty( $hooks ) ) {
-            $hooks_code = "        // Hooks are added automatically based on selected features.\n";
-        } else {
-            $hooks_code = '';
-            foreach ( $hooks as $hook ) {
-                $hooks_code .= "        {$hook}\n";
-            }
-        }
-        $methods_code = implode( "\n\n", $methods );
-
-        $doc_prompt = str_replace( '*/', '* /', $prompt );
-        $doc_description = str_replace( '*/', '* /', $description );
-
-        $template = <<<PHP
-<?php
-/**
- * Core functionality for {$class_prefix}.
- *
- * Generated based on the prompt: {$doc_prompt}
- * Plugin description: {$doc_description}
- */
-
-class {$class_prefix} {
-
-    /**
-     * Singleton instance.
-     *
-     * @var {$class_prefix}
-     */
-    protected static $instance;
-
-    /**
-     * Retrieve singleton instance.
-     *
-     * @return {$class_prefix}
-     */
-    public static function get_instance() {
-        if ( null === static::$instance ) {
-            static::$instance = new static();
-        }
-
-        return static::$instance;
-    }
-
-    /**
-     * Initialize WordPress hooks.
-     *
-     * @return void
-     */
-    public function init() {
-{$hooks_code}    }
-
-    /**
-     * Activation routine.
-     *
-     * @return void
-     */
-    public static function activate() {
-        if ( method_exists( __CLASS__, 'create_database_table' ) ) {
-            static::create_database_table();
-        }
-    }
-
-    /**
-     * Deactivation routine.
-     *
-     * @return void
-     */
-    public static function deactivate() {
-        // Reserved for cleanup actions.
-    }
-
-{$methods_code}
-}
-PHP;
-
-        return $template;
-    }
-
-    /**
-     * Render admin menu method.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_register_admin_menu( $slug ) {
-        $page_title = ucwords( str_replace( '-', ' ', $slug ) );
-
-        return <<<PHP
-    /**
-     * Register admin menu page.
-     *
-     * @return void
-     */
-    public function register_admin_menu() {
-        add_menu_page(
-            esc_html__( '{$page_title}', '{$slug}' ),
-            esc_html__( '{$page_title}', '{$slug}' ),
-            'manage_options',
-            '{$slug}',
-            [ \$this, 'render_admin_page' ],
-            'dashicons-admin-generic',
-            56
-        );
-    }
-
-    /**
-     * Render admin settings page.
-     *
-     * @return void
-     */
-    public function render_admin_page() {
-        if ( ! current_user_can( 'manage_options' ) ) {
-            return;
-        }
-
-        echo '<div class="wrap"><h1>' . esc_html__( '{$page_title} Settings', '{$slug}' ) . '</h1>';
-        echo '<form method="post" action="options.php">';
-        settings_fields( '{$slug}_settings' );
-        do_settings_sections( '{$slug}_settings' );
-        submit_button();
-        echo '</form></div>';
-    }
-PHP;
-    }
-
-    /**
-     * Render settings registration method.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_register_settings( $slug ) {
-        return <<<PHP
-    /**
-     * Register plugin settings fields.
-     *
-     * @return void
-     */
-    public function register_settings() {
-        register_setting( '{$slug}_settings', '{$slug}_options', [
-            'type'              => 'array',
-            'sanitize_callback' => [ \$this, 'sanitize_options' ],
-            'default'           => [
-                'enabled' => true,
-            ],
-        ] );
-
-        add_settings_section(
-            '{$slug}_main_section',
-            esc_html__( 'General Settings', '{$slug}' ),
-            function () {
-                echo '<p>' . esc_html__( 'Configure the primary behaviours for this plugin.', '{$slug}' ) . '</p>';
-            },
-            '{$slug}_settings'
-        );
-
-        add_settings_field(
-            '{$slug}_enabled',
-            esc_html__( 'Enable functionality', '{$slug}' ),
-            function () {
-                $options = get_option( '{$slug}_options', [] );
-                $checked = isset( $options['enabled'] ) ? (bool) $options['enabled'] : true;
-                echo '<label><input type="checkbox" name="{$slug}_options[enabled]" value="1"' . checked( true, $checked, false ) . '/> ' . esc_html__( 'Active', '{$slug}' ) . '</label>';
-            },
-            '{$slug}_settings',
-            '{$slug}_main_section'
-        );
-    }
-
-    /**
-     * Sanitize plugin options.
-     *
-     * @param array $options Raw options.
-     *
-     * @return array
-     */
-    public function sanitize_options( $options ) {
-        $options = is_array( $options ) ? $options : [];
-        $options['enabled'] = isset( $options['enabled'] ) ? (bool) $options['enabled'] : false;
-
-        return $options;
-    }
-PHP;
-    }
-
-    /**
-     * Render admin asset enqueue method.
-     *
-     * @param string $slug            Plugin slug.
-     * @param string $constant_prefix Constant prefix.
-     *
-     * @return string
-     */
-    protected function render_method_enqueue_admin_assets( $slug, $constant_prefix ) {
-        return <<<PHP
-    /**
-     * Enqueue admin assets on relevant screens.
-     *
-     * @param string $hook Current admin page hook.
-     *
-     * @return void
-     */
-    public function enqueue_admin_assets( $hook ) {
-        if ( false === strpos( $hook, '{$slug}' ) ) {
-            return;
-        }
-
-        wp_enqueue_style( '{$slug}-admin', {$constant_prefix}_URL . 'assets/css/admin.css', [], {$constant_prefix}_VERSION );
-        wp_enqueue_script( '{$slug}-admin', {$constant_prefix}_URL . 'assets/js/admin.js', [ 'jquery' ], {$constant_prefix}_VERSION, true );
-    }
-PHP;
-    }
-
-    /**
-     * Render shortcode method.
-     *
-     * @param string $slug     Plugin slug.
-     * @param bool   $has_form If front end form should render.
-     *
-     * @return string
-     */
-    protected function render_method_shortcode( $slug, $has_form, $constant_prefix ) {
-        $form_markup = $has_form
-            ? "        if ( function_exists( 'wp_enqueue_script' ) ) {\n            wp_enqueue_style( '{$slug}-frontend', {$constant_prefix}_URL . 'assets/css/frontend.css', [], {$constant_prefix}_VERSION );\n        }\n        ob_start();\n        include plugin_dir_path( __FILE__ ) . '../partials/form.php';\n        return ob_get_clean();"
-            : "        return '<div class=\"{$slug}-output\">' . esc_html__( 'Generated by {$slug} plugin.', '{$slug}' ) . '</div>';";
-
-        return <<<PHP
-    /**
-     * Render shortcode output.
-     *
-     * @return string
-     */
-    public function render_shortcode() {
-{$form_markup}
-    }
-PHP;
-    }
-
-    /**
-     * Render method to enqueue front-end assets.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_enqueue_front_assets( $slug, $constant_prefix ) {
-        return <<<PHP
-    /**
-     * Enqueue front-end assets.
-     *
-     * @return void
-     */
-    public function enqueue_frontend_assets() {
-        wp_enqueue_style( '{$slug}-frontend', {$constant_prefix}_URL . 'assets/css/frontend.css', [], {$constant_prefix}_VERSION );
-        wp_enqueue_script( '{$slug}-frontend', {$constant_prefix}_URL . 'assets/js/frontend.js', [ 'jquery' ], {$constant_prefix}_VERSION, true );
-    }
-PHP;
-    }
-
-    /**
-     * Render method to handle form submission.
-     *
-     * @param string $slug   Plugin slug.
-     * @param bool   $has_db Whether database storage exists.
-     *
-     * @return string
-     */
-    protected function render_method_handle_form_submission( $slug, $has_db ) {
-        $storage = $has_db
-            ? "\n        if ( ! empty( \\$_POST['{$slug}_field'] ) ) {\n            static::insert_submission( sanitize_text_field( wp_unslash( \\$_POST['{$slug}_field'] ) ) );\n        }"
-            : '';
-
-        return <<<PHP
-    /**
-     * Process form submissions.
-     *
-     * @return void
-     */
-    public function maybe_handle_form_submission() {
-        if ( ! isset( \\$_POST['{$slug}_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( \\$_POST['{$slug}_nonce'] ) ), '{$slug}_submit' ) ) {
-            return;
-        }
-
-        if ( ! is_user_logged_in() ) {
-            return;
-        }
-        {$storage}
-        wp_safe_redirect( wp_get_referer() ? wp_get_referer() : home_url() );
-        exit;
-    }
-PHP;
-    }
-
-    /**
-     * Render custom post type method.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_register_cpt( $slug ) {
-        $label = ucwords( str_replace( '-', ' ', $slug ) );
-
-        return <<<PHP
-    /**
-     * Register custom post type.
-     *
-     * @return void
-     */
-    public function register_custom_post_type() {
-        register_post_type( '{$slug}_item', [
-            'label'               => esc_html__( '{$label} Item', '{$slug}' ),
-            'public'              => true,
-            'has_archive'         => true,
-            'show_in_rest'        => true,
-            'supports'            => [ 'title', 'editor', 'thumbnail', 'custom-fields' ],
-            'rewrite'             => [ 'slug' => '{$slug}-item' ],
-        ] );
-    }
-PHP;
-    }
-
-    /**
-     * Render helper method returning table name.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_get_table_name( $slug ) {
-        return <<<PHP
-    /**
-     * Retrieve database table name.
-     *
-     * @return string
-     */
-    protected static function get_table_name() {
-        global $wpdb;
-
-        return $wpdb->prefix . '{$slug}_records';
-    }
-PHP;
-    }
-
-    /**
-     * Render database table creation method.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_create_table( $slug ) {
-        return <<<PHP
-    /**
-     * Create database table for submissions.
-     *
-     * @return void
-     */
-    protected static function create_database_table() {
-        global $wpdb;
-
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-
-        $table_name      = static::get_table_name();
-        $charset_collate = $wpdb->get_charset_collate();
-
-        $sql = "CREATE TABLE {$table_name} (
-            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            entry_value TEXT NOT NULL,
-            user_id BIGINT UNSIGNED DEFAULT NULL,
-            created_at DATETIME NOT NULL,
-            PRIMARY KEY  (id)
-        ) {$charset_collate};";
-
-        dbDelta( $sql );
-    }
-PHP;
-    }
-
-    /**
-     * Render insert submission helper.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_method_insert_submission( $slug ) {
-        return <<<PHP
-    /**
-     * Store submission in database.
-     *
-     * @param string $value Submission value.
-     *
-     * @return void
-     */
-    protected static function insert_submission( $value ) {
-        global $wpdb;
-
-        $wpdb->insert(
-            static::get_table_name(),
-            [
-                'entry_value' => $value,
-                'user_id'     => get_current_user_id(),
-                'created_at'  => current_time( 'mysql', 1 ),
-            ],
-            [ '%s', '%d', '%s' ]
-        );
-    }
-PHP;
-    }
-
-    /**
-     * Render REST API registration method.
-     *
-     * @param string $slug   Plugin slug.
-     * @param bool   $has_db Database availability.
-     *
-     * @return string
-     */
-    protected function render_method_register_rest_routes( $slug, $has_db ) {
-        if ( $has_db ) {
-            $callback = "                global \\$wpdb;\n                \\$records = \\$wpdb->get_results( 'SELECT * FROM ' . static::get_table_name() . ' ORDER BY created_at DESC', ARRAY_A );";
-        } else {
-            $callback = "                \\$records = [];";
-        }
-
-        return <<<PHP
-    /**
-     * Register REST API routes.
-     *
-     * @return void
-     */
-    public function register_rest_routes() {
-        register_rest_route( '{$slug}/v1', '/records', [
-            'methods'             => 'GET',
-            'permission_callback' => function () {
-                return current_user_can( 'manage_options' );
-            },
-            'callback'            => function () {
-{$callback}
-                return rest_ensure_response( \$records );
-            },
-        ] );
-    }
-
-    /**
-     * Render default frontend CSS stylesheet.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_frontend_css( $slug ) {
-        return <<<CSS
-.{$slug}-form-wrapper {
-    border: 1px solid #e2e8f0;
-    padding: 20px;
-    border-radius: 6px;
-    background: #ffffff;
-}
-
-.{$slug}-form-wrapper label {
-    display: block;
-    font-weight: 600;
-    margin-bottom: 8px;
-}
-
-.{$slug}-form-wrapper input[type="text"],
-.{$slug}-form-wrapper textarea {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #cbd5e1;
-    border-radius: 4px;
-    margin-bottom: 12px;
-}
-CSS;
-    }
-
-    /**
-     * Render default frontend JavaScript file.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_frontend_js( $slug ) {
-        return <<<JS
-( function ( document ) {
-    document.addEventListener( 'DOMContentLoaded', function () {
-        var forms = document.querySelectorAll( '.{$slug}-form-wrapper form' );
-        forms.forEach( function ( form ) {
-            form.addEventListener( 'submit', function () {
-                form.classList.add( '{$slug}-form-submitted' );
-            } );
-        } );
-    } );
-} )( document );
-JS;
-    }
-
-    /**
-     * Render frontend form partial.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_frontend_form( $slug ) {
-        $nonce_field = $slug . '_nonce';
-
-        return <<<PHP
-<?php
-/**
- * Front-end submission form.
- */
-?>
-<div class="{$slug}-form-wrapper">
-    <form method="post">
-        <?php wp_nonce_field( '{$slug}_submit', '{$nonce_field}' ); ?>
-        <label for="{$slug}_field"><?php esc_html_e( 'Enter Details', '{$slug}' ); ?></label>
-        <textarea id="{$slug}_field" name="{$slug}_field" rows="4" required></textarea>
-        <button type="submit" class="button button-primary"><?php esc_html_e( 'Submit', '{$slug}' ); ?></button>
-    </form>
-</div>
-PHP;
-    }
-
-    /**
-     * Render database handler file.
-     *
-     * @param string $slug         Plugin slug.
-     * @param string $class_prefix Class prefix.
-     *
-     * @return string
-     */
-    protected function render_database_handler( $slug, $class_prefix ) {
-        return <<<PHP
-<?php
-/**
- * Database handler for {$class_prefix} plugin.
- */
-
-namespace {$class_prefix}\Database;
-
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
-
-class Manager {
-    // Reserved for extended database logic.
-}
-PHP;
-    }
-
-    /**
-     * Render REST controller template placeholder.
-     *
-     * @param string $slug         Plugin slug.
-     * @param string $class_prefix Class prefix.
-     *
-     * @return string
-     */
-    protected function render_rest_controller( $slug, $class_prefix ) {
-        return <<<PHP
-<?php
-/**
- * REST controller for {$class_prefix} plugin.
- */
-
-namespace {$class_prefix}\Rest;
-
-use WP_REST_Controller;
-
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
-
-class Controller extends WP_REST_Controller {
-    // Placeholder for advanced REST logic.
-}
-PHP;
-    }
-
-    /**
-     * Render admin CSS placeholder.
-     *
-     * @return string
-     */
-    protected function render_admin_css() {
-        return <<<CSS
-.ai-builder-admin-card {
-    background: #ffffff;
-    border-radius: 8px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-    padding: 24px;
-    margin-bottom: 24px;
-}
-
-.ai-builder-admin-card h2 {
-    font-size: 20px;
-    margin-bottom: 16px;
-}
-CSS;
-    }
-
-    /**
-     * Render admin JS placeholder.
-     *
-     * @param string $slug Plugin slug.
-     *
-     * @return string
-     */
-    protected function render_admin_js( $slug ) {
-        return <<<JS
-( function ( wp ) {
-    if ( ! wp ) {
-        return;
-    }
-
-    wp.domReady( function () {
-        console.info( 'Admin scripts loaded for {$slug}' );
-    } );
-} )( window.wp );
-JS;
-    }
-
-    /**
-     * Render readme file contents.
-     *
+     * @param string $slug        Plugin slug.
      * @param string $name        Plugin name.
      * @param string $description Description.
      * @param string $version     Version.
-     * @param string $prompt      Prompt.
+     * @param array  $features    Selected features.
+     * @param string $prompt      Original prompt text.
      *
-     * @return string
+     * @return array|WP_Error
      */
-    protected function render_readme( $name, $description, $version, $prompt ) {
-        $escaped_prompt = str_replace( [ "\r\n", "\r", "\n" ], ' ', $prompt );
+    protected function generate_local_scaffold( $slug, $name, $description, $version, array $features, $prompt ) {
+        $constant_prefix = strtoupper( str_replace( '-', '_', $slug ) );
+        $class_prefix    = implode( '_', array_map( 'ucfirst', explode( '-', $slug ) ) );
+        $text_domain     = sanitize_title( $slug );
 
-        return <<<TXT
-=== {$name} ===
-Contributors: generated-by-ai
-Requires at least: 5.8
-Tested up to: 6.5
-Stable tag: {$version}
-License: GPLv2 or later
-License URI: https://www.gnu.org/licenses/gpl-2.0.html
+        $main_file = sprintf(
+            "<?php\n" .
+            "/**\n" .
+            " * Plugin Name: %1\$s\n" .
+            " * Description: %2\$s\n" .
+            " * Version: %3\$s\n" .
+            " * Author: Generated via AI Plugin Builder Studio Pro\n" .
+            " * Text Domain: %4\$s\n" .
+            " */\n\n" .
+            "if ( ! defined( 'ABSPATH' ) ) {\n    exit;\n}\n\n" .
+            "define( '%5\$s_VERSION', '%3\$s' );\n" .
+            "define( '%5\$s_DIR', plugin_dir_path( __FILE__ ) );\n" .
+            "define( '%5\$s_URL', plugin_dir_url( __FILE__ ) );\n\n" .
+            "require_once %5\$s_DIR . 'includes/class-core.php';\n\n" .
+            "function %6\$s_bootstrap() {\n    \%7\$s_Core::get_instance()->init();\n}\n" .
+            "add_action( 'plugins_loaded', '%6\$s_bootstrap' );\n\n" .
+            "register_activation_hook( __FILE__, [ '\\\%7\$s_Core', 'activate' ] );\n" .
+            "register_deactivation_hook( __FILE__, [ '\\\%7\$s_Core', 'deactivate' ] );\n",
+            $name,
+            $description,
+            $version,
+            $text_domain,
+            $constant_prefix,
+            str_replace( '-', '_', $slug ),
+            $class_prefix
+        );
 
-{$description}
+        $core_class = $this->prepare_core_class( $slug, $class_prefix, $constant_prefix, $features, $prompt );
 
-== Description ==
-This plugin was generated using AI Plugin Builder Studio Pro based on the following idea:
+        $files = [
+            $slug . '/' . $slug . '.php'               => $main_file,
+            $slug . '/includes/class-core.php'         => $core_class,
+            $slug . '/readme.txt'                      => $this->prepare_readme( $name, $description, $version, $prompt ),
+            $slug . '/uninstall.php'                   => $this->prepare_uninstall_file( $slug ),
+            $slug . '/assets/css/admin.css'            => $this->prepare_admin_css(),
+        ];
 
-{$escaped_prompt}
+        if ( in_array( 'frontend-form', $features, true ) || in_array( 'shortcode', $features, true ) ) {
+            $files[ $slug . '/assets/css/frontend.css' ] = $this->prepare_frontend_css( $slug );
+            $files[ $slug . '/assets/js/frontend.js' ]  = $this->prepare_frontend_js( $slug );
+        }
 
-== Installation ==
-1. Upload the plugin to your `/wp-content/plugins/` directory.
-2. Activate the plugin through the 'Plugins' menu in WordPress.
+        if ( in_array( 'frontend-form', $features, true ) ) {
+            $files[ $slug . '/partials/form.php' ] = $this->prepare_frontend_form( $slug );
+        }
 
-== Changelog ==
-= {$version} =
-* Initial release generated by AI Plugin Builder Studio Pro.
-TXT;
+        return [
+            'files'     => $files,
+            'main_file' => $slug . '/' . $slug . '.php',
+        ];
     }
 
     /**
-     * Render uninstall file.
+     * Build core class contents.
      *
-     * @param string $slug Plugin slug.
+     * @param string $slug            Slug.
+     * @param string $class_prefix    Class prefix.
+     * @param string $constant_prefix Constant prefix.
+     * @param array  $features        Feature list.
+     * @param string $prompt          Original prompt.
      *
      * @return string
      */
-    protected function render_uninstall_file( $slug ) {
-        return <<<PHP
-<?php
-/**
- * Uninstall routine for the generated plugin.
- */
+    protected function prepare_core_class( $slug, $class_prefix, $constant_prefix, array $features, $prompt ) {
+        $init_lines = [];
+        $methods    = [];
 
-if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
-    exit;
-}
+        if ( in_array( 'admin-settings', $features, true ) ) {
+            $init_lines[] = "add_action( 'admin_menu', [ \$this, 'register_admin_menu' ] );";
+            $init_lines[] = "add_action( 'admin_init', [ \$this, 'register_settings' ] );";
 
-delete_option( '{$slug}_options' );
-PHP;
+            $methods[] = sprintf(
+                "    public function register_admin_menu() {\n        add_menu_page(\n            esc_html__( '%1\$s Settings', '%2\$s' ),\n            esc_html__( '%1\$s', '%2\$s' ),\n            'manage_options',\n            '%2\$s',\n            [ \$this, 'render_settings_page' ],\n            'dashicons-admin-generic',\n            58\n        );\n    }\n\n    public function render_settings_page() {\n        if ( ! current_user_can( 'manage_options' ) ) {\n            return;\n        }\n\n        echo '<div class="wrap">';\n        echo '<h1>' . esc_html__( '%1\$s', '%2\$s' ) . '</h1>';\n        echo '<form method="post" action="options.php">';\n        settings_fields( '%2\$s_settings' );\n        do_settings_sections( '%2\$s_settings' );\n        submit_button();\n        echo '</form></div>';\n    }\n\n    public function register_settings() {\n        register_setting( '%2\$s_settings', '%2\$s_options', [\n            'type'              => 'array',\n            'sanitize_callback' => [ \$this, 'sanitize_options' ],\n            'default'           => [ 'enabled' => true ],\n        ] );\n\n        add_settings_section(\n            '%2\$s_main_section',\n            esc_html__( 'General Settings', '%2\$s' ),\n            function () {\n                echo '<p>' . esc_html__( 'Configure the core behaviours for this plugin.', '%2\$s' ) . '</p>';\n            },\n            '%2\$s_settings'\n        );\n\n        add_settings_field(\n            '%2\$s_enabled',\n            esc_html__( 'Enable functionality', '%2\$s' ),\n            function () {\n                $options = get_option( '%2\$s_options', [] );\n                $checked = isset( $options['enabled'] ) ? (bool) $options['enabled'] : true;\n                echo '<label><input type="checkbox" name="%2\$s_options[enabled]" value="1"' . checked( true, $checked, false ) . '/> ' . esc_html__( 'Active', '%2\$s' ) . '</label>';\n            },\n            '%2\$s_settings',\n            '%2\$s_main_section'\n        );\n    }\n\n    public function sanitize_options( $options ) {\n        $options = is_array( $options ) ? $options : [];\n        $options['enabled'] = isset( $options['enabled'] ) ? (bool) $options['enabled'] : false;\n\n        return $options;\n    }",
+                $class_prefix,
+                $slug
+            );
+        }
+
+        if ( in_array( 'shortcode', $features, true ) ) {
+            $init_lines[] = "add_shortcode( '{$slug}_display', [ \$this, 'render_shortcode' ] );";
+
+            $methods[] = sprintf(
+                "    public function render_shortcode() {\n        ob_start();\n        echo '<div class="%1\$s-output">' . esc_html__( 'Generated by %1\$s plugin.', '%1\$s' ) . '</div>';\n        return ob_get_clean();\n    }",
+                $slug
+            );
+        }
+
+        if ( in_array( 'frontend-form', $features, true ) ) {
+            $init_lines[] = "add_shortcode( '{$slug}_form', [ \$this, 'render_frontend_form' ] );";
+            $init_lines[] = "add_action( 'wp_enqueue_scripts', [ \$this, 'enqueue_frontend_assets' ] );";
+            $init_lines[] = "add_action( 'init', [ \$this, 'maybe_handle_form_submission' ] );";
+
+            $methods[] = sprintf(
+                "    public function enqueue_frontend_assets() {\n        wp_enqueue_style( '%1\$s-frontend', %2\$s_URL . 'assets/css/frontend.css', [], %2\$s_VERSION );\n        wp_enqueue_script( '%1\$s-frontend', %2\$s_URL . 'assets/js/frontend.js', [ 'jquery' ], %2\$s_VERSION, true );\n    }",
+                $slug,
+                $constant_prefix
+            );
+
+            if ( in_array( 'database', $features, true ) ) {
+                $insert_line = "        if ( ! empty( \\$_POST['{$slug}_field'] ) ) {\n            static::insert_submission( sanitize_text_field( wp_unslash( \\$_POST['{$slug}_field'] ) ) );\n        }";
+            } else {
+                $insert_line = '';
+            }
+
+            $methods[] = sprintf(
+                "    public function maybe_handle_form_submission() {\n        if ( ! isset( \\$_POST['%1\$s_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( \\$_POST['%1\$s_nonce'] ) ), '%1\$s_submit' ) ) {\n            return;\n        }\n\n        %3\$s\n        wp_safe_redirect( wp_get_referer() ? wp_get_referer() : home_url() );\n        exit;\n    }\n\n    public function render_frontend_form() {\n        ob_start();\n        include %2\$s_DIR . 'partials/form.php';\n        return ob_get_clean();\n    }",
+                $slug,
+                $constant_prefix,
+                $insert_line
+            );
+        }
+
+        if ( in_array( 'custom-post-type', $features, true ) ) {
+            $init_lines[] = "add_action( 'init', [ \$this, 'register_custom_post_type' ] );";
+
+            $methods[] = sprintf(
+                "    public function register_custom_post_type() {\n        register_post_type( '%1\$s_item', [\n            'label'        => esc_html__( '%2\$s Item', '%1\$s' ),\n            'public'       => true,\n            'show_in_rest' => true,\n            'supports'     => [ 'title', 'editor', 'thumbnail' ],\n        ] );\n    }",
+                $slug,
+                ucwords( str_replace( '-', ' ', $slug ) )
+            );
+        }
+
+        if ( in_array( 'database', $features, true ) ) {
+            $methods[] = sprintf(
+                "    protected static function get_table_name() {\n        global $wpdb;\n\n        return $wpdb->prefix . '%1\$s_records';\n    }\n\n    public static function activate() {\n        static::create_database_table();\n    }\n\n    protected static function create_database_table() {\n        global $wpdb;\n        require_once ABSPATH . 'wp-admin/includes/upgrade.php';\n\n        $table_name      = static::get_table_name();\n        $charset_collate = $wpdb->get_charset_collate();\n\n        $sql = "CREATE TABLE {$table_name} (\n            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n            entry_value TEXT NOT NULL,\n            user_id BIGINT UNSIGNED DEFAULT NULL,\n            created_at DATETIME NOT NULL,\n            PRIMARY KEY (id)\n        ) {$charset_collate};";\n\n        dbDelta( $sql );\n    }\n\n    protected static function insert_submission( $value ) {\n        global $wpdb;\n\n        $wpdb->insert(\n            static::get_table_name(),\n            [\n                'entry_value' => $value,\n                'user_id'     => get_current_user_id(),\n                'created_at'  => current_time( 'mysql', 1 ),\n            ],\n            [ '%s', '%d', '%s' ]\n        );\n    }",
+                $slug
+            );
+        } else {
+            $methods[] = "    public static function activate() {}";
+        }
+
+        if ( in_array( 'rest-api', $features, true ) ) {
+            $init_lines[] = "add_action( 'rest_api_init', [ \$this, 'register_rest_routes' ] );";
+
+            $callback_body = in_array( 'database', $features, true )
+                ? "                global \\$wpdb;\n                \\V$records = \\V$wpdb->get_results( 'SELECT * FROM ' . static::get_table_name() . ' ORDER BY created_at DESC', ARRAY_A );"
+                : "                \\V$records = [];";
+
+            $callback_body = str_replace( '\\V', '$', $callback_body );
+
+            $methods[] = sprintf(
+                "    public function register_rest_routes() {\n        register_rest_route( '%1\$s/v1', '/records', [\n            'methods'             => 'GET',\n            'permission_callback' => function () {\n                return current_user_can( 'manage_options' );\n            },\n            'callback'            => function () {\n%2\$s\n                return rest_ensure_response( $records );\n            },\n        ] );\n    }",
+                $slug,
+                $callback_body
+            );
+        }
+
+        if ( empty( $init_lines ) ) {
+            $init_lines[] = '// No feature-specific hooks registered.';
+        }
+
+        $class_template = "<?php\n/**\n * Core functionality for %1\$s plugin.\n *\n * Generated from prompt: %2\$s\n */\n\nclass %3\$s_Core {\n\n    protected static $instance;\n\n    public static function get_instance() {\n        if ( null === static::$instance ) {\n            static::$instance = new static();\n        }\n\n        return static::$instance;\n    }\n\n    public function init() {\n        %4\$s\n    }\n\n    public static function deactivate() {}\n\n%5\$s\n}\n";
+
+        return sprintf(
+            $class_template,
+            $class_prefix,
+            addslashes( $prompt ),
+            $class_prefix,
+            implode( "\n        ", $init_lines ),
+            implode( "\n\n", $methods )
+        );
     }
-}
+
+    /**
+     * Build default admin CSS.
+     *
+     * @return string
+     */
+    protected function prepare_admin_css() {
+        return ".ai-pbs-generated-card {\n    background: #ffffff;\n    border: 1px solid #e2e8f0;\n    border-radius: 8px;\n    padding: 20px;\n    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);\n}\n";
+    }
+
+    /**
+     * Build frontend CSS.
+     *
+

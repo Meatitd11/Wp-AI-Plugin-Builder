@@ -85,13 +85,13 @@ class Plugin {
      * @return void
      */
     public function init() {
-        $this->load_textdomain();
-
         $this->connection = new AI_Connection();
         $this->generator  = new Plugin_Generator( $this->connection );
         $this->manager    = new Plugin_Manager( $this->connection );
         $this->admin_menu = new Admin_Menu( $this->connection );
         $this->settings   = new Settings_Controller( $this->connection );
+
+        add_action( 'init', [ $this, 'load_textdomain' ] );
 
         add_action( 'admin_init', [ $this, 'register_settings' ] );
     }
@@ -130,7 +130,7 @@ class Plugin {
      *
      * @return void
      */
-    protected function load_textdomain() {
+    public function load_textdomain() {
         load_plugin_textdomain( 'ai-plugin-builder-studio', false, dirname( AI_PBS_PLUGIN_BASENAME ) . '/languages/' );
     }
 
