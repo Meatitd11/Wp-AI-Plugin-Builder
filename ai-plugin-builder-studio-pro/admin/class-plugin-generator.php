@@ -379,123 +379,124 @@ class Plugin_Generator {
      */
     protected function generate_local_scaffold( $slug, $name, $description, $version, array $features, $prompt ) {
         $constant_prefix = strtoupper( str_replace( '-', '_', $slug ) );
-        $class_prefix    = implode( '_', array_map( 'ucfirst', explode( '-', $slug ) ) );
+        $class_parts     = array_map( 'ucfirst', explode( '-', $slug ) );
+        $class_prefix    = implode( '_', $class_parts );
         $text_domain     = sanitize_title( $slug );
         $bootstrap_fn    = str_replace( '-', '_', $slug ) . '_bootstrap';
 
-        $feature_summary = empty( $features ) ? 'None specified.' : implode( ', ', $features );
+        $sanitized_name        = $this->clean_for_comment( $name );
+        $sanitized_description = $this->clean_for_comment( $description );
+        $prompt_summary        = $this->truncate_string( $prompt, 240 );
 
-        $main_template = <<<'PHP'
-<?php
-/**
- * Plugin Name: {PLUGIN_NAME}
- * Description: {DESCRIPTION}
- * Version: {VERSION}
- * Author: Generated via AI Plugin Builder Studio Pro
- * Text Domain: {TEXT_DOMAIN}
- */
-
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
-
-define( '{CONST_PREFIX}_VERSION', '{VERSION}' );
-define( '{CONST_PREFIX}_DIR', plugin_dir_path( __FILE__ ) );
-define( '{CONST_PREFIX}_URL', plugin_dir_url( __FILE__ ) );
-
-require_once {CONST_PREFIX}_DIR . 'includes/class-core.php';
-
-function {BOOTSTRAP_FN}() {
-    \{CLASS_PREFIX}_Core::get_instance()->init();
-}
-
-add_action( 'plugins_loaded', '{BOOTSTRAP_FN}' );
-
-register_activation_hook( __FILE__, [ '\{CLASS_PREFIX}_Core', 'activate' ] );
-register_deactivation_hook( __FILE__, [ '\{CLASS_PREFIX}_Core', 'deactivate' ] );
-PHP;
-
-        $core_template = <<<'PHP'
-<?php
-/**
- * Core functionality for {CLASS_PREFIX} plugin.
- *
- * Prompt summary: {PROMPT}
- * Features requested: {FEATURES}
- */
-
-class {CLASS_PREFIX}_Core {
-
-    /**
-     * Singleton instance.
-     *
-     * @var {CLASS_PREFIX}_Core
-     */
-    protected static $instance;
-
-    /**
-     * Retrieve instance.
-     *
-     * @return {CLASS_PREFIX}_Core
-     */
-    public static function get_instance() {
-        if ( null === static::$instance ) {
-            static::$instance = new static();
+        if ( empty( $features ) ) {
+            $feature_summary = 'None specified.';
+        } else {
+            $feature_summary = implode(
+                ', ',
+                array_map(
+                    static function ( $feature ) {
+                        $feature = str_replace( [ '-', '_' ], ' ', strtolower( $feature ) );
+                        return ucwords( trim( $feature ) );
+                    },
+                    $features
+                )
+            );
         }
 
-        return static::$instance;
-    }
+        $feature_summary = $this->truncate_string( $feature_summary, 200 );
 
-    /**
-     * Initialise hooks.
-     *
-     * @return void
-     */
-    public function init() {
-        // TODO: Generated features can hook into WordPress here.
-    }
+        $main_lines = [
+            '<?php',
+            '/**',
+            ' * Plugin Name: ' . $sanitized_name,
+            ' * Description: ' . $sanitized_description,
+            ' * Version: ' . $version,
+            ' * Author: Generated via AI Plugin Builder Studio Pro',
+            ' * Text Domain: ' . $text_domain,
+            ' */',
+            '',
+            "if ( ! defined( 'ABSPATH' ) ) {",
+            '    exit;',
+            '}',
+            '',
+            sprintf( "define( '%s_VERSION', '%s' );", $constant_prefix, $version ),
+            sprintf( "define( '%s_DIR', plugin_dir_path( __FILE__ ) );", $constant_prefix ),
+            sprintf( "define( '%s_URL', plugin_dir_url( __FILE__ ) );", $constant_prefix ),
+            '',
+            sprintf( "require_once %s_DIR . 'includes/class-core.php';", $constant_prefix ),
+            '',
+            sprintf( 'function %s() {', $bootstrap_fn ),
+            sprintf( '    %s_Core::get_instance()->init();', $class_prefix ),
+            '}',
+            '',
+            sprintf( "add_action( 'plugins_loaded', '%s' );", $bootstrap_fn ),
+            '',
+            sprintf( "register_activation_hook( __FILE__, [ '%s_Core', 'activate' ] );", $class_prefix ),
+            sprintf( "register_deactivation_hook( __FILE__, [ '%s_Core', 'deactivate' ] );", $class_prefix ),
+        ];
 
-    /**
-     * Activation routine.
-     *
-     * @return void
-     */
-    public static function activate() {
-        // TODO: Add activation tasks.
-    }
+        $core_lines = [
+            '<?php',
+            '/**',
+            ' * Core functionality for ' . $class_prefix . ' plugin.',
+            ' *',
+            ' * Prompt summary: ' . $prompt_summary,
+            ' * Features requested: ' . $feature_summary,
+            ' */',
+            '',
+            sprintf( 'class %s_Core {', $class_prefix ),
+            '',
+            '    /**',
+            '     * Singleton instance.',
+            '     *',
+            '     * @var ' . $class_prefix . '_Core',
+            '     */',
+            '    protected static $instance;',
+            '',
+            '    /**',
+            '     * Retrieve instance.',
+            '     *',
+            '     * @return ' . $class_prefix . '_Core',
+            '     */',
+            '    public static function get_instance() {',
+            '        if ( null === static::$instance ) {',
+            '            static::$instance = new static();',
+            '        }',
+            '',
+            '        return static::$instance;',
+            '    }',
+            '',
+            '    /**',
+            '     * Initialise hooks.',
+            '     *',
+            '     * @return void',
+            '     */',
+            '    public function init() {',
+            '        // TODO: Generated features can hook into WordPress here.',
+            '    }',
+            '',
+            '    /**',
+            '     * Activation routine.',
+            '     *',
+            '     * @return void',
+            '     */',
+            '    public static function activate() {',
+            '        // TODO: Add activation tasks.',
+            '    }',
+            '',
+            '    /**',
+            '     * Deactivation routine.',
+            '     *',
+            '     * @return void',
+            '     */',
+            '    public static function deactivate() {',
+            '        // TODO: Add deactivation cleanup.',
+            '    }',
+            '}',
+        ];
 
-    /**
-     * Deactivation routine.
-     *
-     * @return void
-     */
-    public static function deactivate() {
-        // TODO: Add deactivation cleanup.
-    }
-}
-PHP;
-
-        $main_file = strtr(
-            $main_template,
-            [
-                '{PLUGIN_NAME}' => $name,
-                '{DESCRIPTION}' => $description,
-                '{VERSION}'     => $version,
-                '{TEXT_DOMAIN}' => $text_domain,
-                '{CONST_PREFIX}' => $constant_prefix,
-                '{BOOTSTRAP_FN}' => $bootstrap_fn,
-                '{CLASS_PREFIX}' => $class_prefix,
-            ]
-        );
-
-        $core_file = strtr(
-            $core_template,
-            [
-                '{CLASS_PREFIX}' => $class_prefix,
-                '{PROMPT}'       => $prompt,
-                '{FEATURES}'     => $feature_summary,
-            ]
-        );
+        $main_file = implode( "\n", $main_lines ) . "\n";
+        $core_file = implode( "\n", $core_lines ) . "\n";
 
         return [
             'files'     => [
@@ -504,6 +505,41 @@ PHP;
             ],
             'main_file' => $slug . '/' . $slug . '.php',
         ];
+    }
+
+    /**
+     * Sanitize strings for usage within PHP comments.
+     *
+     * @param string $value Raw string value.
+     *
+     * @return string
+     */
+    protected function clean_for_comment( $value ) {
+        $value = (string) $value;
+        $value = str_replace( '*/', '* /', $value );
+        $value = preg_replace( '/[\r\n]+/', ' ', $value );
+
+        return trim( $value );
+    }
+
+    /**
+     * Truncate sanitized strings to a defined length.
+     *
+     * @param string $value Raw string value.
+     * @param int    $limit Character limit.
+     *
+     * @return string
+     */
+    protected function truncate_string( $value, $limit ) {
+        $clean = $this->clean_for_comment( $value );
+
+        if ( function_exists( 'mb_substr' ) ) {
+            $clean = mb_substr( $clean, 0, $limit );
+        } else {
+            $clean = substr( $clean, 0, $limit );
+        }
+
+        return trim( $clean );
     }
 
     /**

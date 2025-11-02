@@ -180,7 +180,7 @@ class Admin_Menu {
         // Provide variables for partial.
         $currentTab = $current_tab;
 
-        \require AI_PBS_PLUGIN_DIR . 'admin/views/partials/header.php';
+        require AI_PBS_PLUGIN_DIR . 'admin/views/partials/header.php';
 
         $view = AI_PBS_PLUGIN_DIR . 'admin/views/' . $this->tabs[ $tab_key ]['view'];
 

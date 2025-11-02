@@ -85,15 +85,26 @@ class Plugin {
      * @return void
      */
     public function init() {
+        add_action( 'init', [ $this, 'load_textdomain' ], 0 );
+        add_action( 'init', [ $this, 'boot_components' ], 5 );
+        add_action( 'admin_init', [ $this, 'register_settings' ] );
+    }
+
+    /**
+     * Instantiate core plugin components after textdomain is available.
+     *
+     * @return void
+     */
+    public function boot_components() {
+        if ( null !== $this->connection ) {
+            return;
+        }
+
         $this->connection = new AI_Connection();
         $this->generator  = new Plugin_Generator( $this->connection );
         $this->manager    = new Plugin_Manager( $this->connection );
         $this->admin_menu = new Admin_Menu( $this->connection );
         $this->settings   = new Settings_Controller( $this->connection );
-
-        add_action( 'init', [ $this, 'load_textdomain' ] );
-
-        add_action( 'admin_init', [ $this, 'register_settings' ] );
     }
 
     /**

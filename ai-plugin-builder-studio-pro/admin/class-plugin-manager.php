@@ -55,7 +55,7 @@ class Plugin_Manager {
         $nonce = isset( $_POST['nonce'] ) ? \sanitize_text_field( \wp_unslash( $_POST['nonce'] ) ) : '';
         \ai_pbs_verify_nonce( $nonce, 'ai-pbs-admin' );
 
-        \require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
         $projects = DB_Handler::get_projects();
         $data     = [];
@@ -93,7 +93,7 @@ class Plugin_Manager {
         $nonce = isset( $_POST['nonce'] ) ? \sanitize_text_field( \wp_unslash( $_POST['nonce'] ) ) : '';
         \ai_pbs_verify_nonce( $nonce, 'ai-pbs-admin' );
 
-        \require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
         $action = isset( $_POST['actionType'] ) ? \sanitize_key( \wp_unslash( $_POST['actionType'] ) ) : '';
         $slug   = isset( $_POST['pluginSlug'] ) ? \sanitize_title( \wp_unslash( $_POST['pluginSlug'] ) ) : '';
@@ -209,7 +209,7 @@ class Plugin_Manager {
             return '';
         }
 
-        \require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
         $plugins = \get_plugins( '/' . $slug );
 
