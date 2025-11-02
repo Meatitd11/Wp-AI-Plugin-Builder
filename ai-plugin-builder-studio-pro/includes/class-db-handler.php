@@ -76,7 +76,7 @@ class DB_Handler {
         global $wpdb;
 
         $table = static::get_table_name();
-        $now   = \\current_time( 'mysql', 1 );
+        $now   = current_time( 'mysql', 1 );
 
         $defaults = [
             'plugin_name'     => '',
@@ -90,7 +90,7 @@ class DB_Handler {
             'updated_at'      => $now,
         ];
 
-        $data = \\wp_parse_args( $data, $defaults );
+        $data = wp_parse_args( $data, $defaults );
 
         $existing = static::get_project_by_slug( $data['plugin_slug'] );
 
@@ -177,7 +177,7 @@ class DB_Handler {
             $table,
             [
                 'status'     => $status,
-                'updated_at' => \\current_time( 'mysql', 1 ),
+                'updated_at' => current_time( 'mysql', 1 ),
             ],
             [ 'plugin_slug' => $slug ],
             [ '%s', '%s' ],
